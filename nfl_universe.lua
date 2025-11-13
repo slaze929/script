@@ -69,6 +69,7 @@ MainFrame.BackgroundColor3 = Color3.fromRGB(30, 30, 30)
 MainFrame.BorderSizePixel = 0
 MainFrame.Active = true
 MainFrame.Draggable = true
+MainFrame.Visible = true -- Start visible
 MainFrame.Parent = ScreenGui
 
 -- Add corner
@@ -575,11 +576,17 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     end
 end)
 
-print("NFL Universe Script loaded! Press RIGHT CTRL to toggle GUI")
+print("NFL Universe Script loaded! Press RIGHT CTRL or INSERT to toggle GUI")
 
--- Toggle GUI visibility with RIGHT CTRL
-UserInputService.InputBegan:Connect(function(input)
-    if input.KeyCode == Enum.KeyCode.RightControl then
-        MainFrame.Visible = not MainFrame.Visible
+-- Toggle GUI visibility with RIGHT CTRL or INSERT
+UserInputService.InputBegan:Connect(function(input, gameProcessed)
+    -- Support both RightControl and Insert keys
+    if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.Insert then
+        if MainFrame then
+            MainFrame.Visible = not MainFrame.Visible
+            print("[NFL GUI] " .. (MainFrame.Visible and "Shown" or "Hidden"))
+        else
+            warn("[NFL GUI] MainFrame not found!")
+        end
     end
 end)
