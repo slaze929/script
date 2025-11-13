@@ -25,13 +25,13 @@ loadstring(game:HttpGet("https://raw.githubusercontent.com/slaze929/script/main/
 ## Usage
 
 1. Execute the script
-2. Press **RIGHT CTRL** to toggle GUI
+2. Press **RIGHT CTRL** or **INSERT** to toggle GUI
 3. Click toggles to enable features
 4. Adjust sliders for customization
 
 ## Keybinds
 
-- **RIGHT CTRL** - Toggle GUI visibility
+- **RIGHT CTRL** or **INSERT** - Toggle GUI visibility
 
 ## Notes
 
