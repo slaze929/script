@@ -273,30 +273,67 @@ local function PullVector()
     football.CFrame = football.CFrame:Lerp(CFrame.new(pullPosition), 0.1 * Config.PullSmooth)
 end
 
+-- Hook to keep WalkSpeed consistent
+local walkSpeedConnection = nil
+
 local function UpdateWalkSpeed()
-    if Config.WalkSpeedEnabled and Humanoid then
+    if not Humanoid then return end
+
+    if Config.WalkSpeedEnabled then
         Humanoid.WalkSpeed = Config.CustomWalkSpeed
+
+        -- Hook Changed event to keep it consistent
+        if not walkSpeedConnection then
+            walkSpeedConnection = Humanoid:GetPropertyChangedSignal("WalkSpeed"):Connect(function()
+                if Config.WalkSpeedEnabled and Humanoid.WalkSpeed ~= Config.CustomWalkSpeed then
+                    Humanoid.WalkSpeed = Config.CustomWalkSpeed
+                end
+            end)
+        end
     else
-        if not Config.AutoFollowBall then
+        -- Disconnect hook when disabled
+        if walkSpeedConnection then
+            walkSpeedConnection:Disconnect()
+            walkSpeedConnection = nil
+        end
+
+        if not Config.AutoFollowBall and not Config.AutoRush then
             Humanoid.WalkSpeed = OriginalValues.WalkSpeed
         end
     end
 end
 
+-- Hook to keep JumpPower consistent
+local jumpPowerConnection = nil
+
 local function UpdateJumpPower()
     if not Humanoid then return end
 
     if Config.JumpPowerEnabled then
-        -- Force UseJumpPower to true for better control
+        -- Force UseJumpPower to true
         Humanoid.UseJumpPower = true
         Humanoid.JumpPower = Config.CustomJumpPower
 
-        -- Also try JumpHeight in case the game uses it
+        -- Also set JumpHeight for compatibility
         pcall(function()
             Humanoid.JumpHeight = Config.CustomJumpPower / 6.5
         end)
+
+        -- Hook the Changed event to prevent resets
+        if not jumpPowerConnection then
+            jumpPowerConnection = Humanoid:GetPropertyChangedSignal("JumpPower"):Connect(function()
+                if Config.JumpPowerEnabled and Humanoid.JumpPower ~= Config.CustomJumpPower then
+                    Humanoid.JumpPower = Config.CustomJumpPower
+                end
+            end)
+        end
     else
         -- Restore original values
+        if jumpPowerConnection then
+            jumpPowerConnection:Disconnect()
+            jumpPowerConnection = nil
+        end
+
         Humanoid.UseJumpPower = OriginalValues.UseJumpPower
         if OriginalValues.UseJumpPower then
             Humanoid.JumpPower = OriginalValues.JumpPower
@@ -474,68 +511,136 @@ local function GetClosestEnemy()
     return closestPlayer, shortestDistance
 end
 
+-- Auto Rush state tracking
+local rushTarget = nil
+local rushMoveConnection = nil
+
 local function AutoRush()
-    if not Config.AutoRush then return end
+    if not Config.AutoRush then
+        -- Clean up when disabled
+        if rushMoveConnection then
+            rushMoveConnection:Disconnect()
+            rushMoveConnection = nil
+        end
+        rushTarget = nil
+        return
+    end
 
     -- Only rush ball carrier / QB (not random enemies)
     local target = GetBallCarrier()
 
     if target and target:FindFirstChild("HumanoidRootPart") then
-        local targetPos = target.HumanoidRootPart.Position
+        local targetRoot = target.HumanoidRootPart
+        rushTarget = targetRoot
 
-        -- Move to target position (aggression affects how direct the pathing is)
-        local moveWeight = Config.RushAggression / 10  -- Convert 1-10 to 0.1-1.0
+        -- Continuously move to target (like auto follow but more aggressive)
+        Humanoid:MoveTo(targetRoot.Position)
 
-        -- Continuously move to target
-        Humanoid:MoveTo(targetPos)
-
-        -- Face the target (no lerping, direct facing)
-        local direction = (targetPos - HumanoidRootPart.Position).Unit
+        -- Face the target directly for more blatant following
+        local direction = (targetRoot.Position - HumanoidRootPart.Position).Unit
         HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + direction)
+
+        -- Keep refreshing the MoveTo command when target moves
+        if not rushMoveConnection then
+            rushMoveConnection = Humanoid.MoveToFinished:Connect(function(reached)
+                if Config.AutoRush and rushTarget then
+                    -- Immediately move to target again
+                    Humanoid:MoveTo(rushTarget.Position)
+                end
+            end)
+        end
+    else
+        rushTarget = nil
     end
 end
 
 -- Store original hitbox sizes
 local OriginalHitboxes = {}
+local OriginalCharacterSizes = {}
 
 local function UpdateHitboxes()
-    -- Original path: ReplicatedStorage.Games.Replicated.Hitboxes
+    -- Method 1: Try ReplicatedStorage paths
     pcall(function()
-        local hitboxFolder = ReplicatedStorage:FindFirstChild("Games")
-        if hitboxFolder then
-            hitboxFolder = hitboxFolder:FindFirstChild("Replicated")
-            if hitboxFolder then
-                hitboxFolder = hitboxFolder:FindFirstChild("Hitboxes")
-                if hitboxFolder then
-                    for _, hitbox in ipairs(hitboxFolder:GetChildren()) do
-                        if hitbox:IsA("BasePart") then
-                            -- Store original size if not already stored
-                            if not OriginalHitboxes[hitbox] then
-                                OriginalHitboxes[hitbox] = {
-                                    Size = hitbox.Size,
-                                    Transparency = hitbox.Transparency,
-                                    CanCollide = hitbox.CanCollide
-                                }
-                            end
+        local paths = {
+            {"Games", "Replicated", "Hitboxes"},
+            {"Replicated", "Hitboxes"},
+            {"Hitboxes"},
+            {"Games", "Hitboxes"}
+        }
 
-                            if Config.TackleReachEnabled then
-                                hitbox.Size = Vector3.new(Config.TackleReachDistance, Config.TackleReachDistance, Config.TackleReachDistance)
-                                hitbox.Transparency = 0.9
-                                hitbox.CanCollide = false
-                            elseif Config.BlockReachEnabled then
-                                hitbox.Size = Vector3.new(Config.BlockReachSize, Config.BlockReachSize, Config.BlockReachSize)
-                                hitbox.Transparency = 0.9
-                                hitbox.CanCollide = false
-                            else
-                                -- Restore original values
-                                local original = OriginalHitboxes[hitbox]
-                                if original then
-                                    hitbox.Size = original.Size
-                                    hitbox.Transparency = original.Transparency
-                                    hitbox.CanCollide = original.CanCollide
-                                end
+        for _, path in ipairs(paths) do
+            local current = ReplicatedStorage
+            for _, part in ipairs(path) do
+                current = current:FindFirstChild(part)
+                if not current then break end
+            end
+
+            if current then
+                for _, hitbox in ipairs(current:GetChildren()) do
+                    if hitbox:IsA("BasePart") then
+                        if not OriginalHitboxes[hitbox] then
+                            OriginalHitboxes[hitbox] = {
+                                Size = hitbox.Size,
+                                Transparency = hitbox.Transparency,
+                                CanCollide = hitbox.CanCollide
+                            }
+                        end
+
+                        if Config.TackleReachEnabled then
+                            hitbox.Size = Vector3.new(Config.TackleReachDistance, Config.TackleReachDistance, Config.TackleReachDistance)
+                            hitbox.Transparency = 0.9
+                            hitbox.CanCollide = false
+                        elseif Config.BlockReachEnabled then
+                            hitbox.Size = Vector3.new(Config.BlockReachSize, Config.BlockReachSize, Config.BlockReachSize)
+                            hitbox.Transparency = 0.9
+                            hitbox.CanCollide = false
+                        else
+                            local original = OriginalHitboxes[hitbox]
+                            if original then
+                                hitbox.Size = original.Size
+                                hitbox.Transparency = original.Transparency
+                                hitbox.CanCollide = original.CanCollide
                             end
                         end
+                    end
+                end
+            end
+        end
+    end)
+
+    -- Method 2: Modify character parts directly for tackle/block reach
+    pcall(function()
+        if not Character then return end
+
+        local partsToExpand = {"HumanoidRootPart", "Torso", "UpperTorso", "LowerTorso"}
+
+        for _, partName in ipairs(partsToExpand) do
+            local part = Character:FindFirstChild(partName)
+            if part and part:IsA("BasePart") then
+                -- Store original size
+                if not OriginalCharacterSizes[part] then
+                    OriginalCharacterSizes[part] = {
+                        Size = part.Size,
+                        Transparency = part.Transparency
+                    }
+                end
+
+                if Config.TackleReachEnabled then
+                    -- Expand hitbox for tackling
+                    local expandSize = Config.TackleReachDistance / 5
+                    part.Size = OriginalCharacterSizes[part].Size + Vector3.new(expandSize, expandSize, expandSize)
+                    part.Transparency = math.min(part.Transparency + 0.3, 0.9)
+                elseif Config.BlockReachEnabled then
+                    -- Expand hitbox for blocking
+                    local expandSize = Config.BlockReachSize / 5
+                    part.Size = OriginalCharacterSizes[part].Size + Vector3.new(expandSize, expandSize, expandSize)
+                    part.Transparency = math.min(part.Transparency + 0.3, 0.9)
+                else
+                    -- Restore original
+                    local original = OriginalCharacterSizes[part]
+                    if original then
+                        part.Size = original.Size
+                        part.Transparency = original.Transparency
                     end
                 end
             end
@@ -569,11 +674,33 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     OriginalValues.UseJumpPower = Humanoid.UseJumpPower
     OriginalValues.HeadSize = Character.Head.Size
 
+    -- Clear character hitbox tracking
+    OriginalCharacterSizes = {}
+
+    -- Disconnect old connections
+    if walkSpeedConnection then
+        walkSpeedConnection:Disconnect()
+        walkSpeedConnection = nil
+    end
+    if jumpPowerConnection then
+        jumpPowerConnection:Disconnect()
+        jumpPowerConnection = nil
+    end
+    if rushMoveConnection then
+        rushMoveConnection:Disconnect()
+        rushMoveConnection = nil
+    end
+
     -- Stop fly if enabled
     if Config.FlyEnabled then
         StopFly()
         Config.FlyEnabled = false
     end
+
+    -- Reapply settings if they were enabled
+    task.wait(0.5)
+    UpdateWalkSpeed()
+    UpdateJumpPower()
 end)
 
 -- Wait a moment to ensure everything is loaded
