@@ -576,17 +576,45 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     end
 end)
 
-print("NFL Universe Script loaded! Press RIGHT CTRL or INSERT to toggle GUI")
+-- Wait a moment to ensure everything is loaded
+task.wait(0.5)
 
--- Toggle GUI visibility with RIGHT CTRL or INSERT
+print("==============================================")
+print("NFL Universe Script Loaded!")
+print("==============================================")
+print("Press one of these keys to toggle GUI:")
+print("  - INSERT")
+print("  - RIGHT CTRL")
+print("  - LEFT CTRL")
+print("  - DELETE")
+print("==============================================")
+
+-- Toggle GUI visibility with multiple key options
+local function toggleGUI()
+    if MainFrame then
+        MainFrame.Visible = not MainFrame.Visible
+        print("[NFL GUI] " .. (MainFrame.Visible and "SHOWN" or "HIDDEN"))
+    else
+        warn("[NFL GUI ERROR] MainFrame not found!")
+    end
+end
+
+-- Listen for toggle keys (multiple options for compatibility)
 UserInputService.InputBegan:Connect(function(input, gameProcessed)
-    -- Support both RightControl and Insert keys
-    if input.KeyCode == Enum.KeyCode.RightControl or input.KeyCode == Enum.KeyCode.Insert then
-        if MainFrame then
-            MainFrame.Visible = not MainFrame.Visible
-            print("[NFL GUI] " .. (MainFrame.Visible and "Shown" or "Hidden"))
-        else
-            warn("[NFL GUI] MainFrame not found!")
-        end
+    -- Don't check gameProcessed - we want it to work always
+    local keyCode = input.KeyCode
+
+    if keyCode == Enum.KeyCode.Insert then
+        print("[NFL] INSERT pressed - toggling GUI")
+        toggleGUI()
+    elseif keyCode == Enum.KeyCode.RightControl then
+        print("[NFL] RIGHT CTRL pressed - toggling GUI")
+        toggleGUI()
+    elseif keyCode == Enum.KeyCode.LeftControl then
+        print("[NFL] LEFT CTRL pressed - toggling GUI")
+        toggleGUI()
+    elseif keyCode == Enum.KeyCode.Delete then
+        print("[NFL] DELETE pressed - toggling GUI")
+        toggleGUI()
     end
 end)
