@@ -46,7 +46,9 @@ local Config = {
 -- Original values
 local OriginalValues = {
     WalkSpeed = Humanoid.WalkSpeed,
-    JumpPower = Humanoid.JumpPower,
+    JumpPower = Humanoid.JumpPower or 50,
+    JumpHeight = Humanoid.JumpHeight or 7.2,
+    UseJumpPower = Humanoid.UseJumpPower,
     HeadSize = Character.Head.Size
 }
 
@@ -273,12 +275,33 @@ end
 local function UpdateWalkSpeed()
     if Config.WalkSpeedEnabled and Humanoid then
         Humanoid.WalkSpeed = Config.CustomWalkSpeed
+    else
+        if not Config.AutoFollowBall then
+            Humanoid.WalkSpeed = OriginalValues.WalkSpeed
+        end
     end
 end
 
 local function UpdateJumpPower()
-    if Config.JumpPowerEnabled and Humanoid then
+    if not Humanoid then return end
+
+    if Config.JumpPowerEnabled then
+        -- Force UseJumpPower to true for better control
+        Humanoid.UseJumpPower = true
         Humanoid.JumpPower = Config.CustomJumpPower
+
+        -- Also try JumpHeight in case the game uses it
+        pcall(function()
+            Humanoid.JumpHeight = Config.CustomJumpPower / 6.5
+        end)
+    else
+        -- Restore original values
+        Humanoid.UseJumpPower = OriginalValues.UseJumpPower
+        if OriginalValues.UseJumpPower then
+            Humanoid.JumpPower = OriginalValues.JumpPower
+        else
+            Humanoid.JumpHeight = OriginalValues.JumpHeight
+        end
     end
 end
 
@@ -329,41 +352,65 @@ end
 local function InfiniteStamina()
     if not Config.InfiniteStamina then return end
     pcall(function()
-        -- Original path: ReplicatedStorage.Games.Replicated.MiniGames.Mechanics.Sprinting
-        local mechanics = ReplicatedStorage:FindFirstChild("Games")
-        if mechanics then
-            mechanics = mechanics:FindFirstChild("Replicated")
-            if mechanics then
-                mechanics = mechanics:FindFirstChild("MiniGames")
-                if mechanics then
-                    mechanics = mechanics:FindFirstChild("Mechanics")
-                    if mechanics then
-                        local stamina = mechanics:FindFirstChild("Sprinting") or mechanics:FindFirstChild("Stamina")
-                        if stamina and stamina:IsA("NumberValue") then
-                            stamina.Value = 100 -- Max stamina
+        -- Check multiple possible stamina locations
+
+        -- 1. Character stamina values
+        if Character then
+            for _, obj in ipairs(Character:GetDescendants()) do
+                if obj.Name == "Stamina" or obj.Name == "Sprinting" or obj.Name == "Energy" then
+                    if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                        obj.Value = 100
+                    end
+                end
+            end
+        end
+
+        -- 2. ReplicatedStorage paths
+        for _, path in ipairs({
+            {"Games", "Replicated", "MiniGames", "Mechanics"},
+            {"Games", "Replicated", "Mechanics"},
+            {"MiniGames", "Mechanics"},
+            {"Mechanics"}
+        }) do
+            local current = ReplicatedStorage
+            for _, part in ipairs(path) do
+                current = current:FindFirstChild(part)
+                if not current then break end
+            end
+            if current then
+                for _, obj in ipairs(current:GetChildren()) do
+                    if obj.Name == "Stamina" or obj.Name == "Sprinting" or obj.Name == "Energy" then
+                        if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                            obj.Value = 100
                         end
                     end
                 end
             end
         end
 
-        -- Also check character mechanics
-        local charMech = Character:FindFirstChild("Mechanics")
-        if charMech then
-            local stam = charMech:FindFirstChild("Stamina") or charMech:FindFirstChild("Sprinting")
-            if stam and stam:IsA("NumberValue") then
-                stam.Value = 100
+        -- 3. Player-specific stamina
+        local playerData = ReplicatedStorage:FindFirstChild(LocalPlayer.Name)
+        if playerData then
+            for _, obj in ipairs(playerData:GetDescendants()) do
+                if obj.Name == "Stamina" or obj.Name == "Sprinting" or obj.Name == "Energy" then
+                    if obj:IsA("NumberValue") or obj:IsA("IntValue") then
+                        obj.Value = 100
+                    end
+                end
             end
         end
     end)
 end
 
 local function UpdateBighead()
-    if Config.BigheadEnabled and Character.Head then
+    if not Character or not Character.Head then return end
+
+    if Config.BigheadEnabled then
         Character.Head.Size = Vector3.new(Config.HeadSize, Config.HeadSize, Config.HeadSize)
         Character.Head.Transparency = 0.7
         Character.Head.CanCollide = true
     else
+        -- Immediately restore original
         Character.Head.Size = OriginalValues.HeadSize
         Character.Head.Transparency = 0
         Character.Head.CanCollide = false
@@ -401,14 +448,8 @@ local function AutoFollow()
     if not Config.AutoFollowBall then return end
     local carrier = GetBallCarrier()
     if carrier and carrier:FindFirstChild("HumanoidRootPart") then
-        -- Original sets WalkSpeed to 48 when auto-following
-        Humanoid.WalkSpeed = 48
+        -- Move to carrier WITHOUT changing WalkSpeed
         Humanoid:MoveTo(carrier.HumanoidRootPart.Position)
-    else
-        -- Restore original speed when not following
-        if not Config.WalkSpeedEnabled then
-            Humanoid.WalkSpeed = OriginalValues.WalkSpeed
-        end
     end
 end
 
@@ -441,21 +482,20 @@ local function AutoRush()
     if target and target:FindFirstChild("HumanoidRootPart") then
         local targetPos = target.HumanoidRootPart.Position
 
-        -- Move to target (aggression = how direct/blatant the movement is)
-        -- Lower aggression = smoother, less obvious
-        -- Higher aggression = more direct, blatant
+        -- Move to target position (aggression affects how direct the pathing is)
         local moveWeight = Config.RushAggression / 10  -- Convert 1-10 to 0.1-1.0
 
-        -- Smooth movement toward target
+        -- Continuously move to target
         Humanoid:MoveTo(targetPos)
 
-        -- Face target with smoothness based on aggression
+        -- Face the target (no lerping, direct facing)
         local direction = (targetPos - HumanoidRootPart.Position).Unit
-        local currentCFrame = HumanoidRootPart.CFrame
-        local targetCFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + direction)
-        HumanoidRootPart.CFrame = currentCFrame:Lerp(targetCFrame, moveWeight)
+        HumanoidRootPart.CFrame = CFrame.new(HumanoidRootPart.Position, HumanoidRootPart.Position + direction)
     end
 end
+
+-- Store original hitbox sizes
+local OriginalHitboxes = {}
 
 local function UpdateHitboxes()
     -- Original path: ReplicatedStorage.Games.Replicated.Hitboxes
@@ -468,6 +508,15 @@ local function UpdateHitboxes()
                 if hitboxFolder then
                     for _, hitbox in ipairs(hitboxFolder:GetChildren()) do
                         if hitbox:IsA("BasePart") then
+                            -- Store original size if not already stored
+                            if not OriginalHitboxes[hitbox] then
+                                OriginalHitboxes[hitbox] = {
+                                    Size = hitbox.Size,
+                                    Transparency = hitbox.Transparency,
+                                    CanCollide = hitbox.CanCollide
+                                }
+                            end
+
                             if Config.TackleReachEnabled then
                                 hitbox.Size = Vector3.new(Config.TackleReachDistance, Config.TackleReachDistance, Config.TackleReachDistance)
                                 hitbox.Transparency = 0.9
@@ -476,6 +525,14 @@ local function UpdateHitboxes()
                                 hitbox.Size = Vector3.new(Config.BlockReachSize, Config.BlockReachSize, Config.BlockReachSize)
                                 hitbox.Transparency = 0.9
                                 hitbox.CanCollide = false
+                            else
+                                -- Restore original values
+                                local original = OriginalHitboxes[hitbox]
+                                if original then
+                                    hitbox.Size = original.Size
+                                    hitbox.Transparency = original.Transparency
+                                    hitbox.CanCollide = original.CanCollide
+                                end
                             end
                         end
                     end
@@ -504,11 +561,18 @@ LocalPlayer.CharacterAdded:Connect(function(newChar)
     Humanoid = Character:WaitForChild("Humanoid")
     HumanoidRootPart = Character:WaitForChild("HumanoidRootPart")
 
+    -- Reset original values
     OriginalValues.WalkSpeed = Humanoid.WalkSpeed
-    OriginalValues.JumpPower = Humanoid.JumpPower
+    OriginalValues.JumpPower = Humanoid.JumpPower or 50
+    OriginalValues.JumpHeight = Humanoid.JumpHeight or 7.2
+    OriginalValues.UseJumpPower = Humanoid.UseJumpPower
     OriginalValues.HeadSize = Character.Head.Size
 
-    if Config.FlyEnabled then StopFly() Config.FlyEnabled = false end
+    -- Stop fly if enabled
+    if Config.FlyEnabled then
+        StopFly()
+        Config.FlyEnabled = false
+    end
 end)
 
 print("NFL Universe Script loaded! Press RIGHT CTRL to toggle GUI")
